@@ -264,7 +264,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "carla--data-serde"
+name = "carla-data-serde"
 version = "0.1.0"
 dependencies = [
  "carla",
