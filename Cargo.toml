@@ -1,5 +1,5 @@
 [package]
-name = "carla-sensor-data-serde"
+name = "carla--data-serde"
 version = "0.1.0"
 edition = "2024"
 
