@@ -1,0 +1,18 @@
+[package]
+name = "carla-sensor-data-serde"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+carla = { version = "0.11.1" }
+serde = { version = "1.0" }
+nalgebra = { version = "=0.32.6", features = ["serde-serialize"] }
+ndarray = { version = "=0.15.6", features = ["serde"] }
+
+[patch.crates-io]
+# point the carla crate at your fork/branch
+carla = { git = "https://github.com/Eclipse-SDV-Hackathon-Chapter-Three/carla-rust.git", branch = "action-buffer-fix", package = "carla" }
+
+# optional but nice: also point carla-sys at the same repo (same branch)
+# (the repo contains both crates in a workspace)
+carla-sys = { git = "https://github.com/Eclipse-SDV-Hackathon-Chapter-Three/carla-rust.git", branch = "action-buffer-fix", package = "carla-sys" }
