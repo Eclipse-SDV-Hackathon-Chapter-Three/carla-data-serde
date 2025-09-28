@@ -6,6 +6,7 @@ mod lidar_measurement;
 mod nalgebra;
 mod obstacle_detection;
 mod radar_measurement;
+mod imu_measurement;
 
 pub use actor::*;
 pub use collision::*;
@@ -15,3 +16,4 @@ pub use lidar_measurement::*;
 pub use nalgebra::*;
 pub use obstacle_detection::*;
 pub use radar_measurement::*;
+pub use imu_measurement::*;
