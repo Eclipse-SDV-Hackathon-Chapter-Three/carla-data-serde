@@ -1,7 +1,8 @@
 use carla::sensor::data::LaneInvasionEvent;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::road::element::LaneMarking_Type")]
 pub enum LaneMarkingTypeSerDe {
     Other = 0,
@@ -17,7 +18,7 @@ pub enum LaneMarkingTypeSerDe {
     None = 10,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::road::element::LaneMarking_Color")]
 pub enum LaneMarkingColorSerDe {
     Standard = 0,
@@ -28,7 +29,7 @@ pub enum LaneMarkingColorSerDe {
     Other = 5,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::road::element::LaneMarking_LaneChange")]
 pub enum LaneMarkingLaneChangeSerDe {
     None = 0,
@@ -72,5 +73,75 @@ impl From<LaneInvasionEvent> for LaneInvasionEventSerDe {
         LaneInvasionEventSerDe {
             crossed_lane_markings,
         }
+    }
+}
+
+// ---------- enum conversions ----------
+impl From<carla::road::element::LaneMarking_Type> for LaneMarkingTypeSerDe {
+    fn from(v: carla::road::element::LaneMarking_Type) -> Self {
+        use carla::road::element::LaneMarking_Type as F;
+        match v {
+            F::Other => Self::Other,
+            F::Broken => Self::Broken,
+            F::Solid => Self::Solid,
+            F::SolidSolid => Self::SolidSolid,
+            F::SolidBroken => Self::SolidBroken,
+            F::BrokenSolid => Self::BrokenSolid,
+            F::BrokenBroken => Self::BrokenBroken,
+            F::BottsDots => Self::BottsDots,
+            F::Grass => Self::Grass,
+            F::Curb => Self::Curb,
+            F::None => Self::None,
+        }
+    }
+}
+
+impl From<carla::road::element::LaneMarking_Color> for LaneMarkingColorSerDe {
+    fn from(v: carla::road::element::LaneMarking_Color) -> Self {
+        use carla::road::element::LaneMarking_Color as F;
+        match v {
+            F::Standard => Self::Standard,
+            F::Blue => Self::Blue,
+            F::Green => Self::Green,
+            F::Red => Self::Red,
+            F::Yellow => Self::Yellow,
+            F::Other => Self::Other,
+        }
+    }
+}
+
+impl From<carla::road::element::LaneMarking_LaneChange> for LaneMarkingLaneChangeSerDe {
+    fn from(v: carla::road::element::LaneMarking_LaneChange) -> Self {
+        use carla::road::element::LaneMarking_LaneChange as F;
+        match v {
+            F::None => Self::None,
+            F::Right => Self::Right,
+            F::Left => Self::Left,
+            F::Both => Self::Both,
+        }
+    }
+}
+
+// ---------- custom Debug for your types ----------
+impl fmt::Debug for LaneMarkingSerDe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let marking_type = LaneMarkingTypeSerDe::from(self.marking_type.clone());
+        let marking_color = LaneMarkingColorSerDe::from(self.marking_color.clone());
+        let lane_change = LaneMarkingLaneChangeSerDe::from(self.lane_change.clone());
+
+        f.debug_struct("LaneMarkingSerDe")
+            .field("marking_type", &marking_type)
+            .field("marking_color", &marking_color)
+            .field("lane_change", &lane_change)
+            .field("width", &self.width)
+            .finish()
+    }
+}
+
+impl fmt::Debug for LaneInvasionEventSerDe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LaneInvasionEventSerDe")
+            .field("crossed_lane_markings", &self.crossed_lane_markings)
+            .finish()
     }
 }

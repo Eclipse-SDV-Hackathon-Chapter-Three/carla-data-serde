@@ -3,9 +3,13 @@ use carla::sensor::data::{
     LidarDetection as CarlaLidarDetection, LidarMeasurement as LidarMeasurementEvent,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+// How many detections to show in non-alternate ({:?}) mode
+const PREVIEW_DETECTIONS: usize = 5;
 
 /// Remote schema for nested foreign type `Location` (x, y, z)
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::geom::Location")]
 pub struct LocationRemote {
     pub x: f32,
@@ -28,7 +32,7 @@ mod location_with {
 
 /// Remote schema for the foreign element type `LidarDetection`
 /// (nested `point` uses the `location_with` module)
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::sensor::data::LidarDetection")]
 pub struct LidarDetectionRemote {
     #[serde(with = "self::location_with")]
@@ -168,6 +172,111 @@ impl From<LidarMeasurementEvent> for LidarMeasurementSerDe {
             len: m.len(),
             is_empty: m.is_empty(),
             detections,
+        }
+    }
+}
+
+// ------------------------ Debug helpers (no allocations/copies) ------------------------
+
+#[inline]
+fn write_location(p: &CarlaLocation, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "({}, {}, {})", p.x, p.y, p.z)
+}
+
+#[inline]
+fn write_detection(d: &CarlaLidarDetection, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{{ point: ")?;
+    write_location(&d.point, f)?;
+    write!(f, ", intensity: {} }}", d.intensity)
+}
+
+fn write_detection_seq_full<'a>(
+    f: &mut fmt::Formatter<'_>,
+    detections: impl IntoIterator<Item = &'a CarlaLidarDetection>,
+) -> fmt::Result {
+    writeln!(f, "[")?;
+    for d in detections {
+        write!(f, "  ")?;
+        write_detection(d, f)?;
+        writeln!(f, ",")?;
+    }
+    write!(f, "]")
+}
+
+fn write_detection_seq_preview<'a>(
+    f: &mut fmt::Formatter<'_>,
+    detections: impl IntoIterator<Item = &'a CarlaLidarDetection>,
+    total: usize,
+    max_show: usize,
+) -> fmt::Result {
+    let max_show = max_show.min(total);
+    writeln!(f, "[")?;
+
+    // Print up to max_show items
+    let mut shown = 0usize;
+    for d in detections.into_iter().take(max_show) {
+        write!(f, "  ")?;
+        write_detection(d, f)?;
+        writeln!(f, ",")?;
+        shown += 1;
+    }
+
+    // Ellipsis if there are more
+    if total > shown {
+        writeln!(f, "  … ({} more)", total - shown)?;
+    }
+
+    write!(f, "]")
+}
+
+// ------------------------ Custom Debug impls ------------------------
+
+impl<'a> fmt::Debug for LidarMeasurementSerBorrowed<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ds = f.debug_struct("LidarMeasurementSerBorrowed");
+        ds.field("horizontal_angle", &self.horizontal_angle)
+            .field("channel_count", &self.channel_count)
+            .field("len", &self.len)
+            .field("is_empty", &self.is_empty);
+        ds.finish_non_exhaustive()?; // header
+
+        write!(f, "\ndetections ")?;
+        if f.alternate() {
+            write!(f, "(full, {} total) = ", self.len)?;
+            write_detection_seq_full(f, self.detections.iter())
+        } else {
+            write!(
+                f,
+                "(preview showing {} of {}) = ",
+                PREVIEW_DETECTIONS.min(self.len),
+                self.len
+            )?;
+            write_detection_seq_preview(f, self.detections.iter(), self.len, PREVIEW_DETECTIONS)
+        }
+    }
+}
+
+impl fmt::Debug for LidarMeasurementSerDe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ds = f.debug_struct("LidarMeasurementSerDe");
+        ds.field("horizontal_angle", &self.horizontal_angle)
+            .field("channel_count", &self.channel_count)
+            .field("len", &self.len)
+            .field("is_empty", &self.is_empty);
+        ds.finish_non_exhaustive()?; // header
+
+        write!(f, "\ndetections ")?;
+        if f.alternate() {
+            write!(f, "(full, {} total) = ", self.len)?;
+            write_detection_seq_full(f, self.detections.iter())
+        } else {
+            write!(
+                f,
+                "(preview showing {} of {}) = ",
+                PREVIEW_DETECTIONS.min(self.len),
+                self.len
+            )?;
+            write_detection_seq_preview(f, self.detections.iter(), self.len, PREVIEW_DETECTIONS)
         }
     }
 }

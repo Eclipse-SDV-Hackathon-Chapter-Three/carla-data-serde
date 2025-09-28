@@ -1,9 +1,13 @@
 use carla::sensor::data::{Color, Image as ImageEvent};
-use ndarray::{Array2, ArrayView2};
+use ndarray::{Array2, ArrayView1, ArrayView2};
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+const PREVIEW_W: usize = 3;
+const PREVIEW_H: usize = 3;
 
 /// Remote schema for the foreign element type
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::sensor::data::Color")]
 struct ColorRemote {
     b: u8,
@@ -12,15 +16,13 @@ struct ColorRemote {
     a: u8,
 }
 
-// ---------------------------------------------------------------------
-// Borrowed, serialize-only for ArrayView2<Color>
-// ---------------------------------------------------------------------
+// ------------------------ Borrowed serializer ------------------------
+
 mod arrayview2_color_remote {
     use super::*;
     use serde::Serialize;
     use serde::ser::{SerializeSeq, Serializer};
 
-    // Serialize &Color via the remote impl
     struct ColorAsRemote<'a>(&'a Color);
     impl<'a> Serialize for ColorAsRemote<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -28,7 +30,6 @@ mod arrayview2_color_remote {
         }
     }
 
-    // Helper to serialize one row without allocating
     struct Row<'a>(ndarray::ArrayView1<'a, Color>);
     impl<'a> Serialize for Row<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -40,7 +41,6 @@ mod arrayview2_color_remote {
         }
     }
 
-    // Serialize ArrayView2<Color> as a seq of rows (serialize-only)
     pub fn serialize<S: Serializer>(arr: &ArrayView2<Color>, s: S) -> Result<S::Ok, S::Error> {
         let (h, _) = arr.dim();
         let mut outer = s.serialize_seq(Some(h))?;
@@ -76,9 +76,8 @@ impl<'a> From<&'a ImageEvent> for ImageEventSerBorrowed<'a> {
     }
 }
 
-// ---------------------------------------------------------------------
-// Owned, round-trippable for Array2<Color>
-// ---------------------------------------------------------------------
+// ------------------------ Owned, round-trip ------------------------
+
 mod array2_color_remote {
     use super::*;
     use serde::de::{self, SeqAccess, Visitor};
@@ -86,7 +85,6 @@ mod array2_color_remote {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::fmt;
 
-    // Serialize &Color via the remote impl
     struct ColorAsRemote<'a>(&'a Color);
     impl<'a> Serialize for ColorAsRemote<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -94,7 +92,6 @@ mod array2_color_remote {
         }
     }
 
-    // Deserialize Color via the remote impl
     struct ColorFromRemote(Color);
     impl<'de> Deserialize<'de> for ColorFromRemote {
         fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -102,7 +99,6 @@ mod array2_color_remote {
         }
     }
 
-    // Helper to serialize one row without allocating
     struct Row<'a>(ndarray::ArrayView1<'a, Color>);
     impl<'a> Serialize for Row<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
@@ -114,7 +110,6 @@ mod array2_color_remote {
         }
     }
 
-    // Serialize Array2<Color> as a seq of rows
     pub fn serialize<S: Serializer>(arr: &Array2<Color>, s: S) -> Result<S::Ok, S::Error> {
         let (h, _) = arr.dim();
         let mut outer = s.serialize_seq(Some(h))?;
@@ -124,7 +119,6 @@ mod array2_color_remote {
         outer.end()
     }
 
-    // Deserialize Vec<Vec<ColorRemote>> back into Array2<Color>
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Array2<Color>, D::Error> {
         struct Outer;
         impl<'de> Visitor<'de> for Outer {
@@ -169,7 +163,6 @@ pub struct ImageEventSerDe {
 
 impl From<ImageEvent> for ImageEventSerDe {
     fn from(value: ImageEvent) -> Self {
-        // Build an owned Array2<Color> without requiring Clone by copying fields (u8s)
         let view = value.as_array();
         let array: Array2<Color> = view.map(|c| Color {
             b: c.b,
@@ -185,6 +178,153 @@ impl From<ImageEvent> for ImageEventSerDe {
             is_empty: value.is_empty(),
             fov_angle: value.fov_angle(),
             array,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// helpers: write full / preview matrices to the formatter (no allocs)
+// ---------------------------------------------------------------------
+
+fn write_full_matrix<'a, A: 'a>(
+    f: &mut fmt::Formatter<'_>,
+    rows: impl IntoIterator<Item = ArrayView1<'a, A>>,
+    mut write_px: impl FnMut(&A, &mut fmt::Formatter<'_>) -> fmt::Result,
+) -> fmt::Result {
+    writeln!(f, "[")?;
+    for row in rows.into_iter() {
+        write!(f, "  [")?;
+        for (i, px) in row.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write_px(px, f)?;
+        }
+        writeln!(f, "],")?;
+    }
+    write!(f, "]")
+}
+
+fn write_preview_matrix<'a, A: 'a>(
+    f: &mut fmt::Formatter<'_>,
+    rows: impl IntoIterator<Item = ArrayView1<'a, A>>,
+    total_rows: usize,
+    max_h: usize,
+    max_w: usize,
+    mut write_px: impl FnMut(&A, &mut fmt::Formatter<'_>) -> fmt::Result,
+    mut row_len: impl FnMut(&ArrayView1<'a, A>) -> usize,
+) -> fmt::Result {
+    writeln!(f, "[")?;
+    let mut rcount = 0usize;
+    for row in rows.into_iter() {
+        if rcount >= max_h {
+            break;
+        }
+        rcount += 1;
+
+        write!(f, "  [")?;
+        let mut i = 0usize;
+        for px in row.iter() {
+            if i >= max_w {
+                break;
+            }
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write_px(px, f)?;
+            i += 1;
+        }
+        if row_len(&row) > max_w {
+            write!(f, ", …")?;
+        }
+        writeln!(f, "],")?;
+    }
+    if total_rows > rcount {
+        write!(f, "  …\n")?;
+    }
+    write!(f, "]")
+}
+
+// pretty RGBA printer (RGB order first for humans)
+#[inline]
+fn write_rgba(px: &Color, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "({}, {}, {}, {})", px.r, px.g, px.b, px.a)
+}
+
+// ------------------------ Custom Debug impls ------------------------
+
+impl<'a> fmt::Debug for ImageEventSerBorrowed<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (h, w) = self.array.dim();
+
+        let mut ds = f.debug_struct("ImageEventSerBorrowed");
+        ds.field("height", &self.height)
+            .field("width", &self.width)
+            .field("len", &self.len)
+            .field("is_empty", &self.is_empty)
+            .field("fov_angle", &self.fov_angle);
+        ds.finish_non_exhaustive()?;
+
+        write!(f, "\narray ")?;
+        if f.alternate() {
+            write!(f, "(full {}x{}) = ", h, w)?;
+            write_full_matrix(f, self.array.rows(), |c, fmtr| write_rgba(c, fmtr))
+        } else {
+            write!(
+                f,
+                "(preview {}x{}, showing {}x{}) = ",
+                h,
+                w,
+                PREVIEW_H.min(h),
+                PREVIEW_W.min(w)
+            )?;
+            write_preview_matrix(
+                f,
+                self.array.rows(),
+                h,
+                PREVIEW_H,
+                PREVIEW_W,
+                |c, fmtr| write_rgba(c, fmtr),
+                |row: &ArrayView1<'_, Color>| row.len(),
+            )
+        }
+    }
+}
+
+impl fmt::Debug for ImageEventSerDe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (h, w) = self.array.dim();
+
+        let mut ds = f.debug_struct("ImageEventSerDe");
+        ds.field("height", &self.height)
+            .field("width", &self.width)
+            .field("len", &self.len)
+            .field("is_empty", &self.is_empty)
+            .field("fov_angle", &self.fov_angle);
+        ds.finish_non_exhaustive()?;
+
+        write!(f, "\narray ")?;
+        if f.alternate() {
+            write!(f, "(full {}x{}) = ", h, w)?;
+            write_full_matrix(f, self.array.rows(), |c, fmtr| write_rgba(c, fmtr))
+        } else {
+            write!(
+                f,
+                "(preview {}x{}, showing {}x{}) = ",
+                h,
+                w,
+                PREVIEW_H.min(h),
+                PREVIEW_W.min(w)
+            )?;
+            write_preview_matrix(
+                f,
+                self.array.rows(),
+                h,
+                PREVIEW_H.min(h),
+                PREVIEW_W.min(w),
+                |c, fmtr| write_rgba(c, fmtr),
+                |row: &ArrayView1<'_, Color>| row.len(),
+            )
         }
     }
 }

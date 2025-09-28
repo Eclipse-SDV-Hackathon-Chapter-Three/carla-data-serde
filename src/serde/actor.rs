@@ -1,7 +1,7 @@
 use crate::Vector3DSerDe;
 use carla::client::ActorBase;
-use serde::{Deserialize, Serialize};
 use nalgebra::{Isometry3, Translation3};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActorSerDe {

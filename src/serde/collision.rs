@@ -2,7 +2,7 @@ use crate::{ActorSerDe, Vector3DSerDe};
 use carla::sensor::data::CollisionEvent;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CollisionEventSerDe {
     pub actor: ActorSerDe,
     pub other_actor: Option<ActorSerDe>,
