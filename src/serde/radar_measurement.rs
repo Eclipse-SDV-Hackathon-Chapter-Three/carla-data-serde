@@ -2,9 +2,13 @@ use carla::sensor::data::{
     RadarDetection as CarlaRadarDetection, RadarMeasurement as RadarMeasurementEvent,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+// How many detections to show in non-alternate ({:?}) mode
+const PREVIEW_DETECTIONS: usize = 5;
 
 /// Remote schema for the foreign element type
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(remote = "carla::sensor::data::RadarDetection")]
 pub struct RadarDetectionRemote {
     pub velocity: f32,
@@ -116,4 +120,102 @@ pub struct RadarMeasurementSerDe {
     pub detections: Vec<CarlaRadarDetection>,
     pub len: usize,
     pub is_empty: bool,
+}
+
+// ======================= Debug helpers (no allocations) =======================
+
+#[inline]
+fn write_radar_detection(d: &CarlaRadarDetection, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(
+        f,
+        "{{ velocity: {}, azimuth: {}, altitude: {}, depth: {} }}",
+        d.velocity, d.azimuth, d.altitude, d.depth
+    )
+}
+
+fn write_radar_seq_full<'a>(
+    f: &mut fmt::Formatter<'_>,
+    detections: impl IntoIterator<Item = &'a CarlaRadarDetection>,
+) -> fmt::Result {
+    writeln!(f, "[")?;
+    for d in detections {
+        write!(f, "  ")?;
+        write_radar_detection(d, f)?;
+        writeln!(f, ",")?;
+    }
+    write!(f, "]")
+}
+
+fn write_radar_seq_preview<'a>(
+    f: &mut fmt::Formatter<'_>,
+    detections: impl IntoIterator<Item = &'a CarlaRadarDetection>,
+    total: usize,
+    max_show: usize,
+) -> fmt::Result {
+    let max_show = max_show.min(total);
+    writeln!(f, "[")?;
+
+    let mut shown = 0usize;
+    for d in detections.into_iter().take(max_show) {
+        write!(f, "  ")?;
+        write_radar_detection(d, f)?;
+        writeln!(f, ",")?;
+        shown += 1;
+    }
+
+    if total > shown {
+        writeln!(f, "  … ({} more)", total - shown)?;
+    }
+
+    write!(f, "]")
+}
+
+// ======================= Custom Debug impls =======================
+
+impl<'a> fmt::Debug for RadarMeasurementSerBorrowed<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ds = f.debug_struct("RadarMeasurementSerBorrowed");
+        ds.field("detection_amount", &self.detection_amount)
+            .field("len", &self.len)
+            .field("is_empty", &self.is_empty);
+        ds.finish_non_exhaustive()?; // header
+
+        write!(f, "\ndetections ")?;
+        if f.alternate() {
+            write!(f, "(full, {} total) = ", self.len)?;
+            write_radar_seq_full(f, self.detections.iter())
+        } else {
+            write!(
+                f,
+                "(preview showing {} of {}) = ",
+                PREVIEW_DETECTIONS.min(self.len),
+                self.len
+            )?;
+            write_radar_seq_preview(f, self.detections.iter(), self.len, PREVIEW_DETECTIONS)
+        }
+    }
+}
+
+impl fmt::Debug for RadarMeasurementSerDe {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut ds = f.debug_struct("RadarMeasurementSerDe");
+        ds.field("detection_amount", &self.detection_amount)
+            .field("len", &self.len)
+            .field("is_empty", &self.is_empty);
+        ds.finish_non_exhaustive()?; // header
+
+        write!(f, "\ndetections ")?;
+        if f.alternate() {
+            write!(f, "(full, {} total) = ", self.len)?;
+            write_radar_seq_full(f, self.detections.iter())
+        } else {
+            write!(
+                f,
+                "(preview showing {} of {}) = ",
+                PREVIEW_DETECTIONS.min(self.len),
+                self.len
+            )?;
+            write_radar_seq_preview(f, self.detections.iter(), self.len, PREVIEW_DETECTIONS)
+        }
+    }
 }
